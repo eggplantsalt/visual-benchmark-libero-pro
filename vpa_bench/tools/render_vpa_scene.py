@@ -17,6 +17,8 @@ BENCHMARK_NAME = "LIBERO_SPATIAL"
 TASK_ID = 0
 CAMERA_NAME = "agentview"
 OUTPUT_DIR = Path("vpa_outputs") / "render_check"
+RENDER_HEIGHT = 512
+RENDER_WIDTH = 512
 
 # Variant -> texture filename under assets/vpa/textures/
 VPA_VARIANT_TEXTURES = {
@@ -217,8 +219,8 @@ def render_variant(
     env_args = {
         "bddl_file_name": str(bddl_file_abs),
         "camera_names": [CAMERA_NAME],
-        "camera_heights": 128,
-        "camera_widths": 128,
+        "camera_heights": RENDER_HEIGHT,
+        "camera_widths": RENDER_WIDTH,
         "scene_xml": scene_xml_relpath,
     }
 
@@ -286,7 +288,9 @@ def main() -> None:
             save_path=save_path,
         )
 
-    print(f"[done] renderer={backend} rendered variants saved to: {OUTPUT_DIR}")
+    print(
+        f"[done] renderer={backend} rendered {RENDER_HEIGHT}x{RENDER_WIDTH} variants saved to: {OUTPUT_DIR}"
+    )
 
 
 if __name__ == "__main__":
