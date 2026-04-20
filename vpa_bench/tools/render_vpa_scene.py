@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 
 # Headless rendering for V100 / server environments.
