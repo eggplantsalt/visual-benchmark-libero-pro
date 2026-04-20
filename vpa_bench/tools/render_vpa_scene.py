@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import os
 
-# Headless rendering for V100 / server environments.
-os.environ["MUJOCO_GL"] = "egl"
-
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -13,7 +10,6 @@ import numpy as np
 
 from libero.libero import get_libero_path
 from libero.libero.benchmark import get_benchmark
-from libero.libero.envs import OffScreenRenderEnv
 from libero.libero.envs.bddl_utils import get_problem_info
 
 
@@ -28,6 +24,27 @@ VPA_VARIANT_TEXTURES = {
     "neut": "neut_drop.png",
     "blank": "blank_drop.png",
 }
+
+
+def initialize_mujoco_gl() -> str:
+    """
+    Prefer EGL on GPU containers and fallback to OSMESA when EGL is broken.
+    """
+    os.environ["MUJOCO_GL"] = "egl"
+    try:
+        from robosuite.utils.binding_utils import MjRenderContextOffscreen
+        from OpenGL import EGL
+
+        # Touch symbols so import-time issues and broken EGL bindings surface early.
+        _ = MjRenderContextOffscreen
+        _ = EGL.eglQueryString(EGL.EGL_NO_DISPLAY, EGL.EGL_VENDOR)
+        return "egl"
+    except (ImportError, AttributeError, Exception):
+        print(
+            "[SYSTEM] EGL is broken on this V100 container. Switching to OSMESA (CPU)..."
+        )
+        os.environ["MUJOCO_GL"] = "osmesa"
+        return "osmesa"
 
 
 def _draw_center_text(
@@ -191,6 +208,7 @@ def inject_vpa_note(
 
 
 def render_variant(
+    OffScreenRenderEnv,
     bddl_file_abs: Path,
     init_state: np.ndarray,
     scene_xml_relpath: str,
@@ -224,6 +242,11 @@ def render_variant(
 
 
 def main() -> None:
+    backend = initialize_mujoco_gl()
+
+    # Import after MUJOCO_GL is finalized.
+    from libero.libero.envs import OffScreenRenderEnv
+
     assets_root = Path(get_libero_path("assets")).resolve()
     scenes_generated_dir, textures_dir, _ = ensure_vpa_dirs(assets_root)
     ensure_vpa_textures(textures_dir)
@@ -256,13 +279,14 @@ def main() -> None:
         save_path = OUTPUT_DIR / f"task{TASK_ID}_{variant}.png"
 
         render_variant(
+            OffScreenRenderEnv=OffScreenRenderEnv,
             bddl_file_abs=bddl_file,
             init_state=init_state,
             scene_xml_relpath=scene_xml_relpath,
             save_path=save_path,
         )
 
-    print(f"[done] rendered variants saved to: {OUTPUT_DIR}")
+    print(f"[done] renderer={backend} rendered variants saved to: {OUTPUT_DIR}")
 
 
 if __name__ == "__main__":
