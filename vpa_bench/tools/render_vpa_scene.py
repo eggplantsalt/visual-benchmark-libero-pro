@@ -128,8 +128,9 @@ def ensure_vpa_dirs(assets_root: Path) -> tuple[Path, Path]:
 
 
 def build_hijacked_scene_xml(
-    base_scene_xml_abs: Path,
+    base_scene_xml_bytes: bytes,
     texture_file_abs: Path,
+    variant: str,
     body_name: str = "vpa_note_anchor",
     geom_name: str = "vpa_note_geom",
     tex_name: str = "vpa_note_tex",
@@ -138,17 +139,29 @@ def build_hijacked_scene_xml(
     """
     Inject one thin note geom into scene XML and bind it to a variant texture.
     """
-    if not base_scene_xml_abs.exists():
-        raise FileNotFoundError(f"Base scene xml not found: {base_scene_xml_abs}")
     if not texture_file_abs.exists():
         raise FileNotFoundError(f"Texture file not found: {texture_file_abs}")
 
-    tree = ET.parse(base_scene_xml_abs)
-    root = tree.getroot()
+    root = ET.fromstring(base_scene_xml_bytes)
+
+    body_name = f"{body_name}_{variant}"
+    geom_name = f"{geom_name}_{variant}"
+    tex_name = f"{tex_name}_{variant}"
+    mat_name = f"{mat_name}_{variant}"
 
     asset = root.find("asset")
     if asset is None:
         asset = ET.SubElement(root, "asset")
+
+    # Defensive cleanup: remove stale VPA texture/material entries from previous runs.
+    for texture in list(asset.findall("texture")):
+        name = texture.get("name", "")
+        if name.startswith("vpa_note_tex"):
+            asset.remove(texture)
+    for material in list(asset.findall("material")):
+        name = material.get("name", "")
+        if name.startswith("vpa_note_mat"):
+            asset.remove(material)
 
     # Variant-specific texture and material.
     ET.SubElement(
@@ -176,6 +189,12 @@ def build_hijacked_scene_xml(
     worldbody = root.find("worldbody")
     if worldbody is None:
         worldbody = ET.SubElement(root, "worldbody")
+
+    # Defensive cleanup: remove stale VPA bodies from previous runs.
+    for body in list(worldbody.findall("body")):
+        name = body.get("name", "")
+        if name.startswith("vpa_note_anchor"):
+            worldbody.remove(body)
 
     # A very thin box as visual prompt note. contype/conaffinity=0 keeps it non-interactive.
     note_body = ET.SubElement(
@@ -263,8 +282,9 @@ def main() -> None:
             texture_abs = (textures_dir / texture_name).resolve()
 
             hijacked_xml_bytes = build_hijacked_scene_xml(
-                base_scene_xml_abs=base_scene_abs,
+                base_scene_xml_bytes=base_scene_backup,
                 texture_file_abs=texture_abs,
+                variant=variant,
             )
 
             # Hard hijack: overwrite the original base scene file in-place.
