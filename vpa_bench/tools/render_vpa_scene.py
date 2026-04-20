@@ -119,27 +119,22 @@ def infer_default_scene_relpath(problem_name: str) -> str:
     return mapping[problem_name]
 
 
-def ensure_vpa_dirs(assets_root: Path) -> tuple[Path, Path, Path]:
-    # Keep generated XML at the same directory depth as original scenes,
-    # so existing relative texture paths (e.g. ../textures/...) remain valid.
-    scenes_dir = assets_root / "scenes"
+def ensure_vpa_dirs(assets_root: Path) -> tuple[Path, Path]:
     textures_dir = assets_root / "vpa" / "textures"
     carriers_dir = assets_root / "vpa" / "carriers"
-    scenes_dir.mkdir(parents=True, exist_ok=True)
     textures_dir.mkdir(parents=True, exist_ok=True)
     carriers_dir.mkdir(parents=True, exist_ok=True)
-    return scenes_dir, textures_dir, carriers_dir
+    return textures_dir, carriers_dir
 
 
-def inject_vpa_note(
+def build_hijacked_scene_xml(
     base_scene_xml_abs: Path,
-    generated_scene_xml_abs: Path,
     texture_file_abs: Path,
     body_name: str = "vpa_note_anchor",
     geom_name: str = "vpa_note_geom",
     tex_name: str = "vpa_note_tex",
     mat_name: str = "vpa_note_mat",
-) -> None:
+) -> bytes:
     """
     Inject one thin note geom into scene XML and bind it to a variant texture.
     """
@@ -188,7 +183,7 @@ def inject_vpa_note(
         "body",
         {
             "name": body_name,
-            "pos": "0.45 0.00 0.94",
+            "pos": "0.4 0.25 1.05",
         },
     )
     ET.SubElement(
@@ -197,16 +192,15 @@ def inject_vpa_note(
         {
             "name": geom_name,
             "type": "box",
-            "size": "0.06 0.04 0.0012",
+            "size": "0.08 0.05 0.002",
             "material": mat_name,
             "contype": "0",
             "conaffinity": "0",
-            "group": "1",
+            "group": "0",
         },
     )
 
-    generated_scene_xml_abs.parent.mkdir(parents=True, exist_ok=True)
-    tree.write(generated_scene_xml_abs, encoding="utf-8", xml_declaration=True)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
 def render_variant(
@@ -250,7 +244,7 @@ def main() -> None:
     from libero.libero.envs import OffScreenRenderEnv
 
     assets_root = Path(get_libero_path("assets")).resolve()
-    scenes_generated_dir, textures_dir, _ = ensure_vpa_dirs(assets_root)
+    textures_dir, _ = ensure_vpa_dirs(assets_root)
     ensure_vpa_textures(textures_dir)
 
     benchmark = get_benchmark(BENCHMARK_NAME)(0)
@@ -262,31 +256,32 @@ def main() -> None:
     problem_name = problem_info["problem_name"]
     base_scene_relpath = infer_default_scene_relpath(problem_name)
     base_scene_abs = (assets_root / base_scene_relpath).resolve()
+    base_scene_backup = base_scene_abs.read_bytes()
 
-    for variant, texture_name in VPA_VARIANT_TEXTURES.items():
-        texture_abs = (textures_dir / texture_name).resolve()
-        generated_scene_abs = (
-            scenes_generated_dir / f"vpa_gen_task{TASK_ID}_{variant}.xml"
-        )
+    try:
+        for variant, texture_name in VPA_VARIANT_TEXTURES.items():
+            texture_abs = (textures_dir / texture_name).resolve()
 
-        inject_vpa_note(
-            base_scene_xml_abs=base_scene_abs,
-            generated_scene_xml_abs=generated_scene_abs,
-            texture_file_abs=texture_abs,
-        )
+            hijacked_xml_bytes = build_hijacked_scene_xml(
+                base_scene_xml_abs=base_scene_abs,
+                texture_file_abs=texture_abs,
+            )
 
-        scene_xml_relpath = os.path.relpath(generated_scene_abs, assets_root).replace(
-            "\\", "/"
-        )
-        save_path = OUTPUT_DIR / f"task{TASK_ID}_{variant}.png"
+            # Hard hijack: overwrite the original base scene file in-place.
+            base_scene_abs.write_bytes(hijacked_xml_bytes)
 
-        render_variant(
-            OffScreenRenderEnv=OffScreenRenderEnv,
-            bddl_file_abs=bddl_file,
-            init_state=init_state,
-            scene_xml_relpath=scene_xml_relpath,
-            save_path=save_path,
-        )
+            save_path = OUTPUT_DIR / f"task{TASK_ID}_{variant}.png"
+
+            render_variant(
+                OffScreenRenderEnv=OffScreenRenderEnv,
+                bddl_file_abs=bddl_file,
+                init_state=init_state,
+                scene_xml_relpath=base_scene_relpath,
+                save_path=save_path,
+            )
+    finally:
+        # Always restore original scene xml to avoid persistent environment corruption.
+        base_scene_abs.write_bytes(base_scene_backup)
 
     print(
         f"[done] renderer={backend} rendered {RENDER_HEIGHT}x{RENDER_WIDTH} variants saved to: {OUTPUT_DIR}"
