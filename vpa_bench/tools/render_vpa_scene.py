@@ -101,7 +101,9 @@ def infer_default_scene_relpath(problem_name: str) -> str:
 
 
 def ensure_vpa_dirs(assets_root: Path) -> tuple[Path, Path, Path]:
-    scenes_dir = assets_root / "vpa" / "scenes" / "generated"
+    # Keep generated XML at the same directory depth as original scenes,
+    # so existing relative texture paths (e.g. ../textures/...) remain valid.
+    scenes_dir = assets_root / "scenes"
     textures_dir = assets_root / "vpa" / "textures"
     carriers_dir = assets_root / "vpa" / "carriers"
     scenes_dir.mkdir(parents=True, exist_ok=True)
@@ -238,7 +240,9 @@ def main() -> None:
 
     for variant, texture_name in VPA_VARIANT_TEXTURES.items():
         texture_abs = (textures_dir / texture_name).resolve()
-        generated_scene_abs = scenes_generated_dir / f"task{TASK_ID}_{variant}.xml"
+        generated_scene_abs = (
+            scenes_generated_dir / f"vpa_gen_task{TASK_ID}_{variant}.xml"
+        )
 
         inject_vpa_note(
             base_scene_xml_abs=base_scene_abs,
